@@ -1,23 +1,42 @@
 """Functions to extract information from structured_schema"""
 
-from typing import Any, List, Union
+from typing import Any, List, Dict, Union, Tuple
 import re
+
 from neo4j import time
-from Levenshtein import distance
 
 # Import local modules
 from utils.utilities import *
 
-def retrieve_datatypes(jschema: Dict
-                       ) -> Any:
-    """Retrieves the set of datatypes present in the graph."""
-    all_types = []
-    all_nodes = get_nodes_list(jschema)
-    for label in all_nodes:
-        node_info = jschema['node_props'][label]
-        node_types = [el['datatype'] for el in node_info]
-        all_types = all_types + node_types
-    return set(all_types)
+def retrieve_datatypes(jschema: Dict,
+                            comp: str) -> List[str]:
+    
+    """Retrieves the set of datatypes present in the graph.
+    INPUTS:
+    - jschema - graph schema
+    - comp - values node, rel to extract datatypes for the specified graph component
+    OUTPUT:
+    - list of possible datatypes for the specified graph component"""
+
+    if comp=="node":
+        all_node_types = []
+        all_nodes = get_nodes_list(jschema)
+        for label in all_nodes:
+            node_info = jschema['node_props'][label]
+            node_types = [el['datatype'] for el in node_info]
+            all_node_types = all_node_types + node_types
+        return list(set(all_node_types))
+    
+    elif comp=="rel":
+        all_rel_types = set()
+        all_rels = jschema["rel_props"]
+        #rel_dtypes = set()
+        for rel in all_rels.values():
+            for prop in rel:
+                rel_type = prop.get("datatype")
+                if rel_type:
+                    all_rel_types.add(rel_type)
+        return list(all_rel_types)
 
 
 #### NODES ####
@@ -26,6 +45,7 @@ def get_nodes_list(jschema: Dict
                    ) -> List[str]:
     """Returns the list of node labels in the graph."""
     return list(jschema['node_props'].keys())
+
 
 def get_node_properties(jschema: Dict,
                         label: str,
@@ -45,6 +65,7 @@ def get_node_properties(jschema: Dict,
         props = [el['property'] for el in node_info]
     return props
 
+
 def get_nodes_properties_of_datatype(jschema: Dict,
                                      nodes: List[str], 
                                      datatype: str=""
@@ -57,6 +78,7 @@ def get_nodes_properties_of_datatype(jschema: Dict,
         
     # Filter out the nodes that do not have any property of specified type
     return filter_empty_dict_values(outputs)
+
 
 #### RELATIONSHIPS ####
 
@@ -76,6 +98,7 @@ def extract_relationships_list(jschema: Dict,
         rels_list = jschema['relationships']
     return rels_list  
 
+
 def get_relationships_with_datatype(jschema: Dict,
                                     datatype: str,
                                     )->List[str]:
@@ -83,7 +106,7 @@ def get_relationships_with_datatype(jschema: Dict,
         sampler = get_relationships_properties_of_datatype(jschema, datatype)
         rels_string = [list(e.keys())[0] for e in sampler]
         return rels_string
-
+        
 def get_relationships_properties_of_datatype(jschema: Dict,
                                              datatype: str
                                              ) -> List[Any]:
@@ -104,11 +127,13 @@ def neo4j_date_to_string(v: str
     """Sample neo4j.time.Date(2023, 10, 25)'"""
     return f"{v.year}-{v.month:02d}-{v.day:02d}"
 
+
 def neo4j_datetime_to_string(v: str
                              )-> str:
     """Convert neo4j.time.DateTime to ISO formatted string."""
     """Sample neo4j.time.DateTime(2023, 11, 10, 12, 23, 32, 0, tzinfo=<UTC>)"""
     return f"{v.year}-{v.month:02d}-{v.day:02d} T {v.hour:02d}:{v.minute:02d}:{v.second:02d} {v.tzinfo}"
+
 
 def transform_temporals_in_dict(d: Dict
                                 )-> Dict:
@@ -120,6 +145,7 @@ def transform_temporals_in_dict(d: Dict
             d[key] = neo4j_datetime_to_string(value)
     return d
 
+
 def serialize_nodes_data(entries: List[Dict], 
                         )->List[Dict]:
     """Function to parse the Neo4j.time entries from extracted instances
@@ -129,6 +155,7 @@ def serialize_nodes_data(entries: List[Dict],
         for rec in sublist:
             rec['Instance']['properties'] = transform_temporals_in_dict( rec['Instance']['properties'])
     return entries
+
 
 def serialize_relationships_data(entries: List[Dict], 
                                  )->List[Dict]:
@@ -143,18 +170,20 @@ def serialize_relationships_data(entries: List[Dict],
             rec[t[2]] = transform_temporals_in_dict(rec[t[2]])
     return entries
 
+
 #### PARSED INSTANCES ###
 
 def parse_node_instances_datatype(jschema: List[Dict],
-                                  INSTANCES_NODES: List[Dict],
+                                  nodes_instances: List[Dict],
                                   nodes: List[str], 
                                   datatype: str,
+                                  flatten: bool
                                   )->List[Any]:
     """Parse instances of nodes and properties with specified data type.
     Format [[label, property, value], ...]"""
 
     # Parse date and date_time in extracted instances
-    sampler = serialize_nodes_data(INSTANCES_NODES)
+    sampler = serialize_nodes_data(nodes_instances)
 
     # Get the nodes and the properties of specifid datatype
     np_datatype = get_nodes_properties_of_datatype(jschema,nodes, datatype) 
@@ -173,22 +202,26 @@ def parse_node_instances_datatype(jschema: List[Dict],
             parsed_instance = [[label, key, value] for key, value in parsed_dict.items() if key and value]
             if parsed_instance:
                 full_result.append(parsed_instance)
-
-    return flatten_list(full_result)
+    
+    full_result = filter_empty_sublists(full_result)
+                
+    if flatten:
+        return flatten_list(full_result)
+    else:
+        return full_result
+    
 
 def filter_relationships_instances(jschema: Dict,
-                                   INSTANCES_RELS: List[Dict],
+                                   rels_instances: List[Dict],
                                    datatype_start: str,
                                    datatype_end: str
                                    )-> List[Dict]:
     """Parses a list of relationships. It extracts those properties for both source and target nodes that are of specified data types.
-        
-    NOTE: This will give errors if the instance does not have the required combination of source-target data types.
     """
 
     result = []
 
-    for coll in INSTANCES_RELS:
+    for coll in rels_instances:
         for instance in coll:
             triple = list(instance.keys())
             
@@ -205,107 +238,173 @@ def filter_relationships_instances(jschema: Dict,
             if selected_start and selected_end:
                 result.append([label_start, selected_start, rel, label_end, selected_end])
     return result
+    
+
+def filter_relationships_with_props_instances(jschema: Dict,
+                                   instances: List[Dict],
+                                   datatype_start: str,
+                                   datatype_rel: str,
+                                   datatype_end: str
+                                   )-> List[Dict]:
+    """Parses a list of relationships. 
+    It extracts those properties for source, relationship and target that are of specified data types.
+    """
+    
+    result = []
+
+    for coll in instances:
+        for instance in coll:
+            triple = list(instance.keys())
+            
+            # Remove the _start from the label 
+            label_start = triple[0][:-6]
+            # Retrieve node properties with specified datatype
+            selected_props_start = get_node_properties(jschema, label_start, True, datatype_start)
+            # Extract the corresponding subdictionary
+            selected_start = extract_subdict(instance[triple[0]], selected_props_start)
+
+            # Retrieve the relationship type
+            rel = triple[1]
+            # Extract all properties of given type for all relationships
+            selected_props_rel = get_relationships_properties_of_datatype(jschema, datatype_rel)
+            extracted = [d[rel] for d in selected_props_rel if rel in d]
+            if len(extracted) > 0:
+                selected_rel = extract_subdict(instance[triple[1]], extracted[0])
+            else:
+                continue
+        
+            # Remove _end from label
+            label_end = triple[2][:-4]
+            # Retrieve node properties with specifid datatype
+            selected_props_end =  get_node_properties(jschema, label_end, True, datatype_end)
+            # Extract the correspnding subdictionary
+            selected_end = extract_subdict(instance[triple[2]], selected_props_end)
+
+            if selected_start and selected_end and selected_rel:
+                result.append([
+                    label_start, selected_start, 
+                    rel, selected_rel, 
+                    label_end, selected_end
+                    ])
+    return result
+
+    
+def retrieve_instances_with_relationships_props(relationship_instances: List[Any]
+                                                ) -> List[Any]:
+    """Returns the instances where the relationship has attributes."""
+
+    instances_with_rel_props = []
+
+    for rel in relationship_instances:
+        filtered_instances = filter_dicts_list(rel)
+        instances_with_rel_props.append(filtered_instances)
+
+    # Filter the empty sublist
+    instances_with_rel_props = filter_empty_sublists(instances_with_rel_props)
+
+    return instances_with_rel_props
 
 #### EXTRACT LOCAL GRAPH INFO ####
 
-def get_graph_neighborhood(jschema: Dict,
-                           entity: str, 
-                           lev_dist: int,
-                           ) -> Union[List[Any], List[Any], List[Any]]:
+def build_minimal_subschema(jschema: Dict,
+                    nodes_info: List[Tuple[str, Dict[str, str]]],
+                    relationships_info: List[Tuple[str, str, str, Dict[str, str]]],
+                    include_node_props: bool=True,
+                    include_rel_props: bool=False,
+                    include_types: bool = False,
+                    ) -> str:
     """
-    Extracts all node labels, their properties and corresponding relationships information 
-    that are at a certain Levenshtein distance from a given string or contain the given string. 
-    To speed up the process the schema file is used.
+    Constructs a subschema description from given nodes and relationships, with an option to include data types for properties.
+
+    Args:
+    - nodes: A list of tuples, where each tuple represents a node label and a dictionary of the node's properties with their data types.
+    - relationships: A list of tuples, each representing a relationship. The tuple contains the start node label, relationship type, end node label, and a dictionary of the relationship's properties with their data types.
+    - include_types: A boolean indicating whether to include data types in the property descriptions.
+
+    Returns:
+    - A string describing the node labels, their properties (optionally with data types), and relationships with their properties (optionally with data types), formatted for easy reading and suitable for various uses including fine-tuning a language model for Cypher query generation.
     """
-    
-    node_properties = jschema['node_props'] 
-    nodes = list(node_properties.keys())
-    relationships = jschema['relationships']
-    relationships_properties = jschema['rel_props'] 
 
-    # Get a list of similar node labels
-    local_nodes =  [e for e in nodes if (distance(entity, e) <= lev_dist)]
-    
-    # Get all the nodes, and their properties, that have similar labels to entity
-    local_nodes_properties = extract_subdict(node_properties, local_nodes)
-    
-    # Get all relationships that involve at least one of the local_nodes
-    local_relationship_full = [e for e in relationships if e['start'] in local_nodes or e['end'] in local_nodes]
-    local_relationships = [e for e in local_relationship_full if not isinstance(e.get('type'), dict)]
+    def extract_specific_props(comp_props, comp_info):
+        result = []
 
-    # Extract the local_relationship types
-    local_relationships_types = [e['type'] for e in local_relationships]
+        # Iterate through comp_info to handle specified labels and properties
+        for item in comp_info:
+            label = item[0]
+            prop = item[1] if len(item) > 1 else None
+
+            # If no specific property is provided, just add the label
+            if prop is None:
+                result.append([label, {}])
+            else:
+                # Find and add the specified property if it exists
+                found_prop = False
+                for prop_details in comp_props.get(label, []):
+                    if prop_details['property'] == prop:
+                        result.append([label, {prop: prop_details['datatype']}])
+                        found_prop = True
+                        break  # Found the property, no need to keep searching
+                if not found_prop:
+                    # If the property is specified but not found, include the label without properties
+                    result.append([label, {}])
+
+        return result
+
+    local_nodes = extract_specific_props(jschema["node_props"], nodes_info)
+    local_relationships = extract_specific_props(jschema["rel_props"], relationships_info)
+
+    rels_list = [item[0] for item in local_relationships]
+    def extract_specific_relations(rel_list, rels):
+        specific_rels=[]
+        for rel in rels:
+            specific_rel = [r for r in jschema["relationships"] if r["type"]==rel][0]
+            specific_rels.append(specific_rel)
+
+        return specific_rels
+
+    relevant_relations = extract_specific_relations(jschema["relationships"], rels_list)
+
+    # Helper function to format node properties
+    def format_props(props: Dict[str, str],
+                     ) -> str:
+        if include_types:
+            return ", ".join(f"{k}: {v}" for k, v in props.items())
+        else:
+            return ", ".join(f"{k}" for k in props.keys())
+
+
+    # Building relationships
+    relations= [f"{{'start': {e['start']}, 'type': {e['type']}, 'end': {e['end']} }}" for e in relevant_relations]
+    # Building relationship descriptions
+
+    # Combine all parts
+    newline = "\n"
+
+    if include_node_props:
+        # Building node descriptions
+        node_descriptions = [f"{label} {{{format_props(props)}}}" for label, props in local_nodes]
         
-    # Extract the local relationships properties
-    local_relationships_properties = extract_subdict(relationships_properties, local_relationships_types)
-
-    return local_nodes_properties, local_relationships_properties, local_relationships
-
-def get_subgraph_schema(jschema: Dict,
-                        entities: List[str], 
-                        lev_dist: int,
-                        formatted: bool=True,
-                        ) -> Union[List[Any], List[Any], List[Any]]:
-    """
-    Extracts all node labels, their properties and corresponding relationships information for all the entities given in a list. 
-    """
-    subgraph_nodes = [] 
-    subgraph_relationships = []
-    subgraph_relationships_properties = []
-
-    for entity in entities:
-        nodes, relationships_properties, relationships = get_graph_neighborhood(jschema, entity, lev_dist)
-        subgraph_nodes.append(nodes)
-        subgraph_relationships_properties.append(relationships_properties)
-        subgraph_relationships.append(relationships)
-
-    structured_subschema = {
-        "node_props": subgraph_nodes,
-        "rel_props": subgraph_relationships_properties,
-        "relationships": subgraph_relationships,
-        }
-
-    # Format local node properties
-    formatted_local_nodes_props = []
-    for entry in subgraph_nodes:
-        node = list(entry.keys())[0]
-        props_str = ", ".join(
-            [f"{el['property']}: {el['datatype']}"  for el in entry[node]]
-            )
-        formatted_local_nodes_props.append(f"{node} {{{props_str}}}")
-
-    # Format local relationship properties
-    formatted_local_rel_props = []
-    for sublist in subgraph_relationships_properties:
-        for rel in list(sublist.keys()):
-            props_str = ", ".join(
-                [f"{el['property']}: {el['datatype']}" for el in sublist[rel]]
-                )
-            formatted_local_rel_props.append(f"{rel} {{{props_str}}}")
-
-    # Format local relationships
-    formatted_local_rels = []
-    for sublist in subgraph_relationships:
-        formatted_rel = [
-            f"(:{el['start']})-[:{el['type']}]->(:{el['end']})" for el in sublist
-        ]
-        formatted_local_rels.extend(formatted_rel)
-    
-    subschema = "\n".join(
-        [
-            "Node properties are the following:",
-            ",".join(formatted_local_nodes_props),
-            "Relationship properties are the following:",
-            ",".join(formatted_local_rel_props),
-            "The relationships are the following:",
-            ",".join(formatted_local_rels),
-        ]
-    )
-
-    if formatted:
-        return subschema
     else:
-        return structured_subschema
+        node_descriptions = [label for label, _ in local_nodes]
+        
+
+    if include_rel_props:
+        relationship_descriptions= [f"{label} {{{format_props(props)}}}" for label, props in local_relationships]
+
+        subschema = f"""
+        Relevant node labels and their properties {'(with datatypes)' if include_types else ''} are:\n{newline.join(node_descriptions)}\n
+Relevant relationships are:\n{newline.join(relations)}\n
+
+Relevant relationship properties {'(with datatypes)' if include_types else ''} are:\n{newline.join(relationship_descriptions)}\n
+    """
+    else:
+        subschema = f"""
+        Relevant node labels and their properties {'(with datatypes)' if include_types else ''} are:\n{newline.join(node_descriptions)}\n
+Relevant relationships are:\n{newline.join(relations)}\n
+  """
+
+    return subschema.strip()
+
 
 
    

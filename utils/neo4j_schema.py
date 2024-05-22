@@ -1,9 +1,8 @@
-# https://github.com/langchain-ai/langchain/blob/master/libs/community/langchain_community/graphs/neo4j_graph.py
 
 """Functions to extract specific KG information and data using Cypher"""
 
 from typing import Any, List, Iterable
-import pandas as pd
+import neo4j
 
 # Import local modules
 from utils.utilities import *
@@ -43,13 +42,11 @@ class Neo4jSchema(Neo4jGraph):
         url: str, 
         username: str, 
         password: str, 
+        database: str,
         ) -> None:
         """Create a Neo4j graph wrapper instance and extract schema information."""
 
-        self.url=url
-        self.username=username
-        self.password=password
-        self.conn = Neo4jGraph(url, username, password)
+        self.conn = Neo4jGraph(url, username, password, database)
         self.schema: str = ""
         self.structured_schema: Dict[str, Any] = {}
 
@@ -91,7 +88,8 @@ class Neo4jSchema(Neo4jGraph):
         formatted_node_props = []
         for el in node_properties:
             props_str = ", ".join(
-                [f"{prop['property']}: {prop['datatype']}" for prop in el["properties"]]
+                #[f"{prop['property']}: {prop['datatype']}" for prop in el["properties"]]
+                [f"{prop['property']}" for prop in el["properties"]]
             )
             formatted_node_props.append(f"{el['label']} {{{props_str}}}")
 
@@ -99,7 +97,8 @@ class Neo4jSchema(Neo4jGraph):
         formatted_rel_props = []
         for el in rel_properties:
             props_str = ", ".join(
-                [f"{prop['property']}: {prop['datatype']}" for prop in el["properties"]]
+                #[f"{prop['property']}: {prop['datatype']}" for prop in el["properties"]]
+                [f"{prop['property']}" for prop in el["properties"]]
             )
             formatted_rel_props.append(f"{el['type']} {{{props_str}}}")
 
@@ -112,8 +111,8 @@ class Neo4jSchema(Neo4jGraph):
             [
                 "Node properties are the following:",
                 ",".join(formatted_node_props),
-                "Relationship properties are the following:",
-                ",".join(formatted_rel_props),
+                #"Relationship properties are the following:",
+                #",".join(formatted_rel_props),
                 "The relationships are the following:",
                 ",".join(formatted_rels),
             ]
@@ -138,6 +137,7 @@ class Neo4jSchema(Neo4jGraph):
             extracted.append(data)
 
         return extracted
+    
         
     def extract_relationship_instances(self,
                                        rel: Dict,
@@ -154,6 +154,7 @@ class Neo4jSchema(Neo4jGraph):
         
         data = self.conn.query(query_rels)
         return data 
+    
     
     def extract_multiple_relationships_instances( self,
                             rtriples: List[Any], 
