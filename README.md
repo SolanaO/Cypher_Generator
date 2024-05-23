@@ -7,7 +7,7 @@ Our approach employs approximately 100 generating functions. The question-Cypher
 
 To facilitate ease of use and transparency, the dataset generation process is provided in a notebook format. To generate the dataset, obtain your Neo4j knowledge graph credentials and follow the steps outlined in the notebook: `SFT_Parametric_Data_Builder.ipynb`. Many steps within the notebook are adjustable to cater to specific user needs. Some functionalities rely on modules found in the `utils` directory.
 
-Additionally, we include two fine-tuning notebooks that utilize QLoRA to ease computational demands, along with PEFT and TRL from HuggingFace, and using `CodeLlama-13B` and `StarCoder2-3B` large languga emodels.
+Additionally, we include two fine-tuning notebooks that utilize QLoRA to ease computational demands, along with PEFT and TRL from HuggingFace, and using `CodeLlama-13B` and `StarCoder2-3B` large languge models.
 
 
  
